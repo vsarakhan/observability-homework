@@ -26,21 +26,86 @@
  *  4.6** Построить графики по этим метрикам в графане. Для этого вам нужен язык запросов PromQl. Советую использовать chatGPT, он очень хорошо генерирует запросы PromQL
  */
 
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
+using Observability.Homework.Extensions;
+using Observability.Homework.Jobs;
 using Observability.Homework.Models;
 using Observability.Homework.Services;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+
+const string serviceName = "Observability.Homework";
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tpb =>
+    {
+        tpb
+            .AddSource(serviceName)
+            .SetResourceBuilder(ResourceBuilder
+                .CreateDefault()
+                .AddService(serviceName: serviceName))
+            .AddAspNetCoreInstrumentation(options =>
+            {
+                options.EnrichWithHttpRequest = (activity, _) =>
+                {
+                    activity.SetTag("timestamp", DateTime.Now.ToString("s", CultureInfo.InvariantCulture));
+                };
+
+                options.Filter = context => context.Request.Path.Value?.Contains("/metrics") != true;
+            })
+            .AddJaegerExporter();
+    })
+    .WithMetrics(mpb =>
+    {
+        mpb
+            .AddMeter(OrderMetrics.MeterName)
+            .AddMeter(PizzeriaMetrics.MeterName)
+            .AddMeter(OvenMetrics.MeterName)
+            .AddPrometheusExporter();
+    });
+
+builder.Logging.AddAppLogging(builder.Environment);
+
+builder.Services.AddSingleton(TracerProvider.Default.GetTracer(serviceName));
 builder.Services.AddSingleton<IPizzaBakeryService, PizzaBakeryService>();
+builder.Services.AddSingleton<OrderMetrics>();
+builder.Services.AddSingleton<PizzeriaMetrics>();
+builder.Services.AddSingleton<OvenMetrics>();
+
+builder.Services.AddHostedService<ProductsInOvenCollector>();
 
 var app = builder.Build();
 
-app.MapPost("/order", async ([FromBody] Order order, IPizzaBakeryService pizzaBakeryService, CancellationToken cancellationToken) =>
+app.MapPrometheusScrapingEndpoint();
+
+app.MapPost("/order", async (
+    [FromBody] Order order,
+    IPizzaBakeryService pizzaBakeryService,
+    ILogger<Program> logger,
+    OrderMetrics orderMetrics,
+    CancellationToken cancellationToken) =>
 {
+    using var _ = logger.BeginScope(new Dictionary<string, object> { { "clientId", order.Client.Id } });
+
+    if (logger.IsEnabled(LogLevel.Information))
+    {
+        logger.LogInformation("Order with product {@product} has been pushed", order.Product);
+    }
+
+    orderMetrics.OrderPushed(order);
+
     if (order.Product.Type is ProductType.Pizza)
         await pizzaBakeryService.DoPizza(order.Product, cancellationToken);
-    
+
+    if (logger.IsEnabled(LogLevel.Information))
+    {
+        logger.LogInformation("Order with product {@product} has been completed", order.Product);
+    }
+
     return Results.Ok(order.Product);
 });
 
