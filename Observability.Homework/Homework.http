@@ -1,0 +1,8 @@
+@HomeWorkToDoList_HostAddress = http://localhost:5216
+
+POST {{HomeWorkToDoList_HostAddress}}/order/
+Accept: application/json
+Content-Type: application/json
+
+{"product":{"type":0},"client":{"id":"rgerg"}}
+###

@@ -27,20 +27,57 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
+using Observability.Homework.Extensions;
 using Observability.Homework.Models;
 using Observability.Homework.Services;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
+var serviceName = "Observability.Homework";
 var builder = WebApplication.CreateBuilder(args);
-
+//builder.AppLogging();
+//Trace don,t work with logging=(
+builder.Logging.ClearProviders();
+builder.Services
+    .AddOpenTelemetry()
+    .WithTracing(tcb =>
+    {
+         tcb
+          .AddSource(serviceName)
+            .SetResourceBuilder(
+               ResourceBuilder.CreateDefault()
+                    .AddService(serviceName: serviceName))
+           .AddAspNetCoreInstrumentation()
+         .AddJaegerExporter();
+    }) 
+    .WithMetrics(mpb => mpb
+            .AddAspNetCoreInstrumentation()
+            //.AddRuntimeInstrumentation()
+            //.AddProcessInstrumentation()
+            .AddPrometheusExporter()
+        .AddMeter(PizzeriaMetricsService.MeterName)
+    );
+builder.Services.AddSingleton(TracerProvider.Default.GetTracer(serviceName));
 builder.Services.AddSingleton<IPizzaBakeryService, PizzaBakeryService>();
+builder.Services.AddSingleton<PizzeriaMetricsService>();
 
 var app = builder.Build();
-
-app.MapPost("/order", async ([FromBody] Order order, IPizzaBakeryService pizzaBakeryService, CancellationToken cancellationToken) =>
+app.MapPrometheusScrapingEndpoint();
+app.MapPost("/order", async ([FromServices] Tracer tracer,PizzeriaMetricsService metric, [FromBody] Order order, IPizzaBakeryService pizzaBakeryService, CancellationToken cancellationToken) =>
 {
-    if (order.Product.Type is ProductType.Pizza)
-        await pizzaBakeryService.DoPizza(order.Product, cancellationToken);
-    
+    using var span = tracer.StartActiveSpan("Request DoPizza");
+    span.SetAttribute("userId", order.Client.Id);
+    span.SetAttribute("productId", order.Product.Id.ToString());
+    metric.ProductType(order.Product);
+    DateTime start = DateTime.Now;
+    using (app.Logger.BeginScope(new Dictionary<string, object> { { "ClientId", order.Client.Id } }))
+    {
+        app.Logger.LogInformation("request");
+        if (order.Product.Type is ProductType.Pizza)
+            await pizzaBakeryService.DoPizza(order.Product, cancellationToken);
+    }
+    metric.RecordProductCooking((DateTime.Now-start).Microseconds);
     return Results.Ok(order.Product);
 });
 
