@@ -1,10 +1,10 @@
 global:
-  scrape_interval: 15s  # Интервал сбора метрик
+  scrape_interval: 5s  # Интервал сбора метрик
 
 scrape_configs:
   - job_name: 'my-aspnetcore-app'  # Название задачи
     scheme: https  # Указываем, что соединение по HTTPS
     static_configs:
-      - targets: ['host.docker.internal:7242']  # Порт и адрес твоего приложения
+      - targets: ['host.docker.internal:52217']  # Порт и адрес твоего приложения
     tls_config:
       insecure_skip_verify: true  # Игнорировать ошибки сертификата

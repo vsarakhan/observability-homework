@@ -9,20 +9,29 @@
     }
   },
   "profiles": {
-    "http": {
+    "http dev": {
       "commandName": "Project",
-      "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "applicationUrl": "http://localhost:5216",
+      "dotnetRunMessages": false,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:52216",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "http release": {
+      "commandName": "Project",
+      "dotnetRunMessages": false,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:52216",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Release"
       }
     },
     "https": {
       "commandName": "Project",
       "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "applicationUrl": "https://localhost:7205;http://localhost:5216",
+      "launchBrowser": false,
+      "applicationUrl": "https://localhost:52217;http://localhost:52216",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }

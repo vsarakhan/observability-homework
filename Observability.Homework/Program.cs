@@ -26,22 +26,63 @@
  *  4.6** Построить графики по этим метрикам в графане. Для этого вам нужен язык запросов PromQl. Советую использовать chatGPT, он очень хорошо генерирует запросы PromQL
  */
 
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
+using Observability.Homework.Extensions;
 using Observability.Homework.Models;
 using Observability.Homework.Services;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
+var serviceName = "Observability.Homework";
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddLogging();
+builder.Services
+    .AddOpenTelemetry()
+    .WithTracing(tcb =>
+    {
+        tcb
+            .AddSource(serviceName)
+            .SetResourceBuilder(
+                ResourceBuilder.CreateDefault().AddService(serviceName: serviceName))
+            .AddAspNetCoreInstrumentation(options =>
+            {
+                options.EnrichWithHttpRequest = (activity, _) =>
+                {
+                    activity.SetTag("LocalDatetime", DateTime.Now.ToString(CultureInfo.InvariantCulture));
+                };
+            })
+            .AddJaegerExporter();
+    })
+    .WithMetrics(mpb =>
+    {
+        mpb
+            .AddMeter(MetricsService.MetricsServiceName)
+            .AddPrometheusExporter();
+    });
+
+builder.Services.AddSingleton(TracerProvider.Default.GetTracer(serviceName));
+builder.Services.AddSingleton<MetricsService>();
 builder.Services.AddSingleton<IPizzaBakeryService, PizzaBakeryService>();
 
 var app = builder.Build();
 
-app.MapPost("/order", async ([FromBody] Order order, IPizzaBakeryService pizzaBakeryService, CancellationToken cancellationToken) =>
+app.MapPost("/order", async (
+    [FromBody] Order order,
+    ILogger<Program> logger,
+    IPizzaBakeryService pizzaBakeryService,
+    MetricsService metricsService,
+    CancellationToken cancellationToken) =>
 {
+    using var _ = logger.BeginScope(new Dictionary<string, object> { { "ClientId", order.Client.Id } });
+    
+    metricsService.ProductType(order);
     if (order.Product.Type is ProductType.Pizza)
         await pizzaBakeryService.DoPizza(order.Product, cancellationToken);
     
     return Results.Ok(order.Product);
 });
-
+app.MapPrometheusScrapingEndpoint();
 app.Run();
